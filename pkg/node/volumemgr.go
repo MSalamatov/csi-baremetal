@@ -25,6 +25,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sirupsen/logrus"
 	k8sError "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -53,6 +55,13 @@ import (
 	"github.com/dell/csi-baremetal/pkg/eventing"
 	p "github.com/dell/csi-baremetal/pkg/node/provisioners"
 	"github.com/dell/csi-baremetal/pkg/node/provisioners/utilwrappers"
+)
+
+var (
+	reconcileDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name: "reconcile_duration",
+		Help: "Duration of the reconcile",
+	})
 )
 
 const volumeFinalizer = "dell.emc.csi/volume-cleanup"
@@ -184,6 +193,10 @@ func (m *VolumeManager) SetProvisioners(provs map[p.VolumeType]p.Provisioner) {
 // Volume.Spec.CSIStatus is Removing.
 // Returns reconcile result as ctrl.Result or error if something went wrong
 func (m *VolumeManager) Reconcile(req ctrl.Request) (ctrl.Result, error) {
+	stime := time.Now()
+	defer func() {
+		reconcileDuration.Observe(float64(time.Since(stime)))
+	}()
 	m.volMu.LockKey(req.Name)
 	ll := m.log.WithFields(logrus.Fields{
 		"method":   "Reconcile",

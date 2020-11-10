@@ -12,6 +12,9 @@ spec:
     metadata:
       labels:
         app: baremetal-csi-node
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '2112'
     spec:
       {{- if or (.Values.nodeSelector.key) (.Values.nodeSelector.value)}}
       nodeSelector:
@@ -75,6 +78,9 @@ spec:
           {{- end }}
           - name: liveness-port
             containerPort: 9808
+            protocol: TCP
+          - name: metrics
+            containerPort: 2112
             protocol: TCP
         livenessProbe:
           failureThreshold: 5

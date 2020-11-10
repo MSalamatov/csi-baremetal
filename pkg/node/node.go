@@ -24,9 +24,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
 	"github.com/golang/protobuf/ptypes/wrappers"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -44,6 +47,13 @@ import (
 	"github.com/dell/csi-baremetal/pkg/common"
 	"github.com/dell/csi-baremetal/pkg/controller"
 	"github.com/dell/csi-baremetal/pkg/crcontrollers/csibmnode"
+)
+
+var (
+	nodeStage = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name: "node_stage_request",
+		Help: "Duration of the stages",
+	}, []string{"method"})
 )
 
 // CSINodeService is the implementation of NodeServer interface from GO CSI specification.
@@ -123,6 +133,10 @@ func (s *CSINodeService) checkRequestContext(ctx context.Context, logger *logrus
 // Receives golang context and CSI Spec NodeStageVolumeRequest
 // Returns CSI Spec NodeStageVolumeResponse or error if something went wrong
 func (s *CSINodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStageVolumeRequest) (*csi.NodeStageVolumeResponse, error) {
+	stime := time.Now()
+	defer func() {
+		nodeStage.WithLabelValues("NodeStageVolume").Observe(float64(time.Since(stime)))
+	}()
 	ll := s.log.WithFields(logrus.Fields{
 		"method":   "NodeStageVolume",
 		"volumeID": req.GetVolumeId(),

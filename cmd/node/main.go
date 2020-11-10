@@ -23,10 +23,12 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/container-storage-interface/spec/lib/go/csi"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc"
 	"gopkg.in/yaml.v2"
@@ -122,7 +124,10 @@ func main() {
 		csiNodeService,
 		lvg.NewController(k8sClientForLVG, nodeID, logger),
 		logger)
-
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		http.ListenAndServe(":2112", nil)
+	}()
 	// register CSI calls handler
 	csi.RegisterNodeServer(csiUDSServer.GRPCServer, csiNodeService)
 	csi.RegisterIdentityServer(csiUDSServer.GRPCServer, csiNodeService)
