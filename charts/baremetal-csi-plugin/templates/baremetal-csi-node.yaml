@@ -130,6 +130,9 @@ spec:
         - name: mountpoint-dir
           mountPath: /var/lib/kubelet/pods
           mountPropagation: "Bidirectional"
+        - name: csi-path
+          mountPath: /var/lib/kubelet/plugins/kubernetes.io/csi
+          mountPropagation: "Bidirectional"
         {{- if .Values.env.mountHostRoot }}
         - name: host-root
           mountPath: /hostroot
@@ -269,6 +272,9 @@ spec:
         hostPath:
           path: /var/lib/kubelet/pods
           type: Directory
+      - name: csi-path
+        hostPath:
+          path: /var/lib/kubelet/plugins/kubernetes.io/csi
       {{- if eq .Values.drivemgr.deployConfig true }}
       - name: drive-config
         configMap:
