@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -45,6 +46,8 @@ import (
 	"github.com/dell/csi-baremetal/pkg/controller"
 	csibmnodeconst "github.com/dell/csi-baremetal/pkg/crcontrollers/csibmnode/common"
 )
+
+const stagingFileName = "dev"
 
 // CSINodeService is the implementation of NodeServer interface from GO CSI specification.
 // Contains VolumeManager in a such way that it is a single instance in the driver
@@ -118,6 +121,26 @@ func (s *CSINodeService) checkRequestContext(ctx context.Context, logger *logrus
 	}
 }
 
+func getStagingPath(logger *logrus.Entry, req interface{}) string {
+	var stagingPath string
+	switch v := req.(type) {
+	case *csi.NodeStageVolumeRequest:
+		stagingPath = v.StagingTargetPath
+	case *csi.NodePublishVolumeRequest:
+		stagingPath = v.StagingTargetPath
+	case *csi.NodeUnstageVolumeRequest:
+		stagingPath = v.StagingTargetPath
+	default:
+		stagingPath = ""
+	}
+
+	if stagingPath != "" {
+		stagingPath = path.Join(stagingPath, stagingFileName)
+	}
+	logger.Debugf("staging path is: %s", stagingPath)
+	return stagingPath
+}
+
 // NodeStageVolume is the implementation of CSI Spec NodeStageVolume. Performs when the first pod consumes a volume.
 // This method mounts volume with appropriate VolumeID into the StagingTargetPath from request.
 // Receives golang context and CSI Spec NodeStageVolumeRequest
@@ -168,7 +191,7 @@ func (s *CSINodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStage
 			currStatus)
 	}
 
-	targetPath := req.StagingTargetPath
+	targetPath := getStagingPath(ll, req)
 
 	partition, err := s.getProvisionerForVolume(&volumeCR.Spec).GetVolumePath(volumeCR.Spec)
 	if err != nil {
@@ -182,7 +205,7 @@ func (s *CSINodeService) NodeStageVolume(ctx context.Context, req *csi.NodeStage
 		errToReturn error
 		newStatus   = apiV1.VolumeReady
 	)
-	if err := s.fsOps.PrepareAndPerformMount(partition, targetPath, false); err != nil {
+	if err := s.fsOps.PrepareAndPerformMount(partition, targetPath, true, false); err != nil {
 		ll.Errorf("Unable to prepare and mount: %v. Going to set volumes status to failed", err)
 		newStatus = apiV1.Failed
 		resp, errToReturn = nil, status.Error(codes.Internal, "failed to stage volume: mount error")
@@ -254,7 +277,7 @@ func (s *CSINodeService) NodeUnstageVolume(ctx context.Context, req *csi.NodeUns
 		resp        = &csi.NodeUnstageVolumeResponse{}
 		errToReturn error
 	)
-	if errToReturn = s.fsOps.UnmountWithCheck(req.GetStagingTargetPath()); errToReturn != nil {
+	if errToReturn = s.fsOps.UnmountWithCheck(getStagingPath(ll, req)); errToReturn != nil {
 		volumeCR.Spec.CSIStatus = apiV1.Failed
 		resp = nil
 	}
@@ -319,9 +342,8 @@ func (s *CSINodeService) NodePublishVolume(ctx context.Context, req *csi.NodePub
 
 	var (
 		volumeID = req.GetVolumeId()
-		srcPath  = req.GetStagingTargetPath()
+		srcPath  = getStagingPath(ll, req)
 		dstPath  = req.GetTargetPath()
-		bind     = true // for mount option
 	)
 	// Inline volume has the same cycle as usual volume,
 	// but k8s calls only Publish/Unpulish methods so we need to call CreateVolume before publish it
@@ -336,8 +358,6 @@ func (s *CSINodeService) NodePublishVolume(ctx context.Context, req *csi.NodePub
 			ll.Errorf("failed to get partition for volume %v: %v", vol, err)
 			return nil, status.Error(codes.Internal, "failed to publish inline volume: partition error")
 		}
-		// For inline volume mount is performed without options
-		bind = false
 	} else if len(srcPath) == 0 {
 		return nil, status.Error(codes.InvalidArgument, "Staging Path missing in request")
 	}
@@ -362,7 +382,8 @@ func (s *CSINodeService) NodePublishVolume(ctx context.Context, req *csi.NodePub
 		errToReturn error
 	)
 
-	if err := s.fsOps.PrepareAndPerformMount(srcPath, dstPath, bind); err != nil {
+	_, isBlock := req.GetVolumeCapability().GetAccessType().(*csi.VolumeCapability_Block)
+	if err := s.fsOps.PrepareAndPerformMount(srcPath, dstPath, isBlock, !isBlock); err != nil {
 		ll.Errorf("Unable to mount volume: %v", err)
 		newStatus = apiV1.Failed
 		resp, errToReturn = nil, fmt.Errorf("failed to publish volume: mount error")
