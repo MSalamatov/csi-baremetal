@@ -14,3 +14,5 @@ coverage.html
 .vscode
 # python 
 __pycache__
+# private drive manager
+halmgr
